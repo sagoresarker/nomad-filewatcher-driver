@@ -53,31 +53,42 @@ func NewFileWatcher(
 }
 
 func (fw *FileWatcher) Start() error {
+	if fw.watcher == nil {
+		return fmt.Errorf("watcher not initialized")
+	}
+
 	// Add paths to watch
 	for _, path := range fw.paths {
-		if fw.recursiveWatch {
-			err := filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-				if info.IsDir() {
-					return fw.watcher.Add(path)
-				}
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("failed to add path recursively: %v", err)
-			}
-		} else {
-			if err := fw.watcher.Add(path); err != nil {
-				return fmt.Errorf("failed to add path: %v", err)
-			}
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("path must be absolute: %s", path)
+		}
+
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("invalid path %s: %v", path, err)
+		}
+
+		if err := fw.addWatch(path); err != nil {
+			return err
 		}
 	}
 
-	// Start watching
 	go fw.watch()
 	return nil
+}
+
+func (fw *FileWatcher) addWatch(path string) error {
+	if fw.recursiveWatch {
+		return filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return fw.watcher.Add(p)
+			}
+			return nil
+		})
+	}
+	return fw.watcher.Add(path)
 }
 
 func (fw *FileWatcher) watch() {
@@ -183,4 +194,12 @@ func containsString(slice []string, str string) bool {
 		}
 	}
 	return false
+}
+func (fw *FileWatcher) Cleanup() error {
+	if fw.watcher != nil {
+		if err := fw.watcher.Close(); err != nil {
+			return fmt.Errorf("failed to close watcher: %v", err)
+		}
+	}
+	return nil
 }
